@@ -2,210 +2,231 @@
 
 ## What is a Process?
 
-A **process** is a running program. When you type `ls` and press Enter, the shell creates a new process, runs `ls` inside it, waits for it to finish, then shows you the next prompt.
+A **process** is a running program. When you type `ls`, Unix:
+1. Creates a new process
+2. Loads the `ls` program into it
+3. Runs it
+4. Destroys it when it's done
 
-Every process has:
-- A **PID** (process ID) — a unique number
-- A **parent** — the process that created it (your shell)
-- An **owner** — which user it runs as
-- **Three streams**: stdin, stdout, stderr
-- An **exit code** — returned when it finishes (0 = success)
-
----
-
-## Viewing Processes
+At any moment, dozens or hundreds of processes are running on your machine simultaneously.
 
 ```bash
-ps             # processes in your current terminal
-ps aux         # ALL processes on the system
-ps aux | grep ruby    # find ruby processes
-```
-
-Understanding `ps aux` output:
-```
-USER  PID  %CPU  %MEM  VSZ  RSS  TTY  STAT  START  TIME  COMMAND
-yosia 1234  0.0   0.1  123M  4M  s001  S+   14:00  0:00  ruby server.rb
-```
-
-- `PID` — process ID
-- `%CPU`, `%MEM` — resource usage
-- `STAT` — status: `S` = sleeping, `R` = running, `Z` = zombie
-- `COMMAND` — what's running
-
-```bash
-top         # live, updating view of processes (press q to quit)
-htop        # prettier version (install with brew install htop)
+ps aux           # show ALL running processes
+ps aux | wc -l   # how many?
+top              # live view, updates every second (q to quit)
+htop             # nicer version (brew install htop)
 ```
 
 ---
 
-## Running in the Background
+## Every Process Has an ID
 
-Normally a command runs in the **foreground** — it holds your terminal until it's done.
-
-```bash
-sleep 10    # blocks for 10 seconds, you can't type
-```
-
-Add `&` to run in the **background**:
+Each process gets a unique **PID** (Process ID):
 
 ```bash
-sleep 10 &
-# [1] 5678
-# [1] = job number, 5678 = PID
+echo $$          # PID of your current shell
+sleep 10 &       # run sleep in background
+echo $!          # PID of the last background process
+ps aux | grep sleep
 ```
-
-Now your prompt returns immediately. The sleep continues in the background.
-
-```bash
-jobs        # list background jobs
-fg          # bring last background job to foreground
-fg %1       # bring job #1 to foreground
-bg %1       # send stopped job to background
-```
-
-### Stopping and killing
-
-```bash
-Ctrl+C      # send SIGINT — interrupt (usually stops the program)
-Ctrl+Z      # send SIGTSTP — pause (suspend) the program
-Ctrl+\      # send SIGQUIT — quit with core dump
-
-kill 5678          # send SIGTERM to PID 5678 (polite stop)
-kill -9 5678       # send SIGKILL — force kill (no cleanup)
-kill -HUP 5678     # send SIGHUP — hangup (often means "reload config")
-killall ruby       # kill all processes named "ruby"
-```
-
-**SIGTERM vs SIGKILL:**
-- SIGTERM (15): politely asks the process to stop. It can catch this signal and clean up first.
-- SIGKILL (9): immediately terminates. The process has no chance to clean up. Use as last resort.
 
 ---
 
-## Signals
+## Foreground vs Background
 
-Signals are messages the OS sends to processes. Some important ones:
+By default, commands run in the **foreground** — the shell waits for them to finish before giving you the prompt back.
+
+```bash
+sleep 10         # foreground: you wait 10 seconds
+sleep 10 &       # background: shell returns immediately, prints [1] PID
+```
+
+### Managing background jobs
+
+```bash
+sleep 100 &         # start in background
+sleep 200 &         # start another
+jobs                # list background jobs
+fg                  # bring last job to foreground
+fg %1               # bring job #1 to foreground
+bg %2               # send job #2 to background
+kill %1             # kill job #1
+```
+
+### Ctrl shortcuts
+
+```
+Ctrl+C    — kill the current foreground process (sends SIGINT)
+Ctrl+Z    — pause (suspend) it, sends it to background stopped
+Ctrl+\    — kill with core dump (SIGQUIT)
+```
+
+After `Ctrl+Z`:
+```bash
+bg        # resume it in the background
+fg        # resume it in the foreground
+```
+
+---
+
+## Killing Processes
+
+```bash
+kill 1234           # send SIGTERM (polite: "please stop")
+kill -9 1234        # send SIGKILL (force kill, can't be ignored)
+kill -HUP 1234      # send SIGHUP (reload config, for servers)
+killall ruby        # kill all processes named "ruby"
+pkill -f "my script" # kill by matching command name pattern
+```
+
+Signals are messages sent to processes:
 
 | Signal | Number | Meaning |
 |--------|--------|---------|
-| SIGTERM | 15 | Please terminate (can be caught) |
-| SIGKILL | 9 | Terminate NOW (cannot be caught) |
+| SIGTERM | 15 | Please terminate (default kill) |
+| SIGKILL | 9 | Die NOW — cannot be caught |
 | SIGINT | 2 | Interrupt (Ctrl+C) |
-| SIGTSTP | 20 | Pause (Ctrl+Z) |
-| SIGHUP | 1 | Hangup (reload config for servers) |
-| SIGUSR1 | 10 | User-defined (app-specific meaning) |
+| SIGHUP | 1 | Hangup (reload config) |
+| SIGSTOP | 19 | Pause the process |
+| SIGCONT | 18 | Continue a paused process |
 
 ---
 
-## stdin, stdout, stderr — Revisited
+## Standard I/O — The Three Streams
 
-Every process gets three file descriptors automatically:
+Every process gets three open "files" when it starts:
 
-```
-0 = stdin  — where it reads from
-1 = stdout — where it writes normal output
-2 = stderr — where it writes errors
-```
+| Stream | Number | Default |
+|--------|--------|---------|
+| stdin | 0 | keyboard |
+| stdout | 1 | screen |
+| stderr | 2 | screen (but separate!) |
 
-These are just files. When you run a command in the terminal:
-- stdin is connected to your keyboard
-- stdout and stderr are connected to your screen
-
-When you use `|`, the shell connects stdout of one process to stdin of the next. That's all a pipe is.
+This is why redirection works — you're just swapping what those file descriptors point to.
 
 ```bash
-ls | grep ".rb"
-```
-What happens:
-1. Shell creates two processes: `ls` and `grep`
-2. Shell connects `ls`'s stdout to `grep`'s stdin
-3. Both run at the same time
-4. `ls` writes filenames → `grep` reads and filters → screen
+# stderr and stdout look the same on screen but are separate:
+ls /real /fake 2>/dev/null     # suppress errors, show output
+ls /real /fake 1>/dev/null     # suppress output, show errors
+ls /real /fake &>/dev/null     # suppress everything
 
-### /dev/stdin and /dev/stdout
-
-These device files let you redirect explicitly:
-
-```bash
-echo "hello" > /dev/stdout    # same as just echoing to screen
-cat /dev/stdin                # reads from keyboard until Ctrl+D
+# Capture both in a variable:
+output=$(ls /real /fake 2>&1)
 ```
 
-### Here-strings and Here-documents
+### Why separate stderr?
 
-Sometimes you want to give a command a string as stdin without a file:
-
-```bash
-# Here-string: feed a single string as stdin
-grep "hello" <<< "hello world"
-
-# Here-document: multi-line stdin
-cat << EOF
-This is line 1
-This is line 2
-Today is $(date)
-EOF
-```
-
-The `EOF` can be any word — it marks the end of the input.
-
----
-
-## nohup — Keep Running After Logout
-
-Normally, when you close your terminal, all your processes die (they receive SIGHUP).
+So you can pipe stdout to the next command without polluting it with error messages:
 
 ```bash
-nohup long-running-script.sh &
-```
-
-`nohup` makes the process ignore SIGHUP. Output goes to `nohup.out` by default.
-
----
-
-## wait — Wait for Background Jobs
-
-```bash
-#!/bin/bash
-# Run three things in parallel, wait for all
-
-process_chunk.sh part1 &
-process_chunk.sh part2 &
-process_chunk.sh part3 &
-
-wait    # wait for all background jobs to finish
-echo "All done!"
+find / -name "*.log" 2>/dev/null | head -20
+# Without 2>/dev/null, "Permission denied" errors flood the output
 ```
 
 ---
 
-## Pipe Internals — How it Really Works
+## Pipes Under the Hood
 
-When the shell runs `ls | grep ruby`, this is what actually happens:
+When you write `cmd1 | cmd2`, Unix:
+1. Creates a **pipe** — a small in-memory buffer with two ends (read/write)
+2. Forks `cmd1`, connects its stdout to the write end
+3. Forks `cmd2`, connects its stdin to the read end
+4. Runs both simultaneously
 
-1. Shell calls `pipe()` — creates a pipe (a buffer in memory)
-2. Shell calls `fork()` — creates a copy of itself (child process)
-3. Child process closes its stdin, connects it to the pipe's read end
-4. Shell calls `fork()` again for the second command
-5. Second process closes its stdout, connects it to the pipe's write end
-6. Both processes call `exec()` to replace themselves with `ls` and `grep`
-7. `ls` writes to stdout → goes into the pipe buffer → `grep` reads from stdin
+They run **at the same time**. `cmd2` starts processing as soon as `cmd1` produces output. This is why pipes are fast even on huge files — data flows through without being fully stored anywhere.
 
-You never see this. The shell does it all automatically when you type `|`. But understanding it explains why:
-- Pipes are fast (in-memory, no disk)
-- Pipes handle data as streams (one line at a time, not all at once)
-- Processes in a pipeline run concurrently
+```bash
+# This works on a 100GB file efficiently:
+cat huge.log | grep "error" | tail -10
+# grep starts outputting before cat is done reading
+```
+
+---
+
+## `wait`, `nohup`, and Long-Running Jobs
+
+```bash
+# Run a long job and wait for it:
+long_process &
+pid=$!
+echo "Running as PID $pid..."
+wait $pid
+echo "Done! Exit code: $?"
+```
+
+### nohup — survive terminal close
+
+```bash
+nohup long_process.sh &
+```
+
+`nohup` (no hangup) makes the process ignore the SIGHUP signal that gets sent when you close your terminal. Output goes to `nohup.out`.
+
+### disown
+
+```bash
+long_process &
+disown    # detach it from the shell completely
+```
+
+---
+
+## Environment Variables
+
+Every process inherits a copy of its parent's **environment** — a set of name=value pairs.
+
+```bash
+env             # show all environment variables
+printenv HOME   # show one variable
+```
+
+When you set `export VAR=value`, child processes inherit it. Without `export`, only the current shell sees it:
+
+```bash
+LOCAL="only here"
+export SHARED="children can see this"
+
+bash -c 'echo $LOCAL'   # => (empty)
+bash -c 'echo $SHARED'  # => children can see this
+```
+
+This is why you put things in `.zshrc` with `export` — every new shell (child) inherits them.
+
+---
+
+## `exec` — Replace the Current Process
+
+```bash
+exec ls -la   # replace the shell with ls — shell is gone after this
+```
+
+`exec` doesn't fork a new process — it *replaces* the current one. After `exec`, your shell is gone. This is actually how the shell runs programs internally (fork → exec).
+
+---
+
+## Process Substitution
+
+A clever feature — treat a command's output as a file:
+
+```bash
+diff <(ls dir1) <(ls dir2)     # diff the output of two commands
+wc -l <(find . -name "*.rb")   # count files found
+```
+
+`<(command)` runs the command and provides its output as a temporary file-like thing.
 
 ---
 
 ## Exercises
 
-1. Run `sleep 60 &` then immediately check `jobs` and `ps`. Find the PID. Kill it with `kill`.
-2. Start a long command, pause it with Ctrl+Z, check `jobs`, resume with `fg`.
-3. Run two processes in parallel with `&`, then `wait` for both. Time it vs running sequentially.
-4. Start a process with `nohup`, close and reopen terminal, check if it's still running with `ps aux`.
-5. Explain what happens, step by step, when you run: `cat file.txt | sort | uniq -c | sort -rn`
+1. Start `sleep 1000` in the background. Find its PID. Kill it with `kill`. Verify it's gone with `ps`.
+2. Run a command, pause it with Ctrl+Z, check `jobs`, then resume it with `fg`.
+3. What's the difference between `kill -9` and `kill` (no flag)? When would you use each?
+4. Write a script that runs 3 tasks in parallel and waits for all to finish:
+   ```bash
+   sleep 3 &; sleep 2 &; sleep 1 &; wait; echo "all done"
+   ```
+5. Use `nohup` to run a script that appends the date to a file every second. Close your terminal. Reopen it. Is it still running?
 
 ---
 
@@ -213,21 +234,20 @@ You never see this. The shell does it all automatically when you type `|`. But u
 
 | Concept | Key point |
 |---------|-----------|
-| Process | a running program with PID, owner, streams |
-| `ps aux` | see all processes |
+| Process | a running instance of a program |
+| PID | unique ID for each process |
 | `&` | run in background |
 | `jobs`, `fg`, `bg` | manage background jobs |
-| `Ctrl+C` | interrupt, `Ctrl+Z` = pause |
 | `kill` | send signals to processes |
-| SIGTERM vs SIGKILL | polite stop vs forced stop |
-| stdin/stdout/stderr | file descriptors 0, 1, 2 |
-| `<<< "string"` | here-string: stdin from a string |
-| `<< EOF` | here-document: multi-line stdin |
+| stdin/stdout/stderr | the three standard streams (0, 1, 2) |
+| `2>/dev/null` | discard stderr |
+| Pipes | two processes running simultaneously, connected |
 | `nohup` | survive terminal close |
-| `wait` | wait for all background jobs |
+| `exec` | replace current process |
+| `export` | share variables with child processes |
 
 ---
 
 ## The Big Idea from This Chapter
 
-Processes are the living, breathing units of Unix. They're created by forking, they communicate through streams, and they die with exit codes. The pipe is the genius mechanism that connects them — not by writing to files, but by connecting streams directly in memory. This is why Unix pipelines are so fast and so composable.
+Unix multitasking is built on one simple mechanism: **fork and exec**. The shell forks a copy of itself, the copy execs the new program, and the original shell waits. Pipes work because both sides of the pipe run simultaneously. Once you understand this, the behavior of background jobs, signals, and I/O redirection all make sense.

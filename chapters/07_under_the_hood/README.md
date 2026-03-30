@@ -1,233 +1,244 @@
 # Chapter 7 — Under the Hood
 
-## What Actually Happens When You Type a Command
+## What Actually Happens When You Type a Command?
 
-You've been using `ls`, `grep`, and pipes. Now let's open the hood and see the engine.
+Let's trace exactly what happens when you type `ls -la` and press Enter.
 
-When you press Enter after typing a command, a precise sequence of events happens. Understanding this sequence is understanding Unix.
+```
+You type:  ls -la
+           ↓
+Shell reads it → parses it → finds /bin/ls → forks → execs → waits → prompt
+```
+
+Let's break down every step.
 
 ---
 
-## The Three System Calls: fork, exec, wait
+## Step 1: The Shell Reads and Parses
 
-Almost everything in Unix processes comes down to three system calls:
+The shell reads your input character by character. It:
+1. Splits it into **tokens**: `ls`, `-la`
+2. Expands variables (`$HOME` → `/Users/yosia`)
+3. Expands globs (`*.rb` → `a.rb b.rb c.rb`)
+4. Handles quotes and escaping
+5. Builds an **argument list**: `["ls", "-la"]`
 
-### fork() — Make a Copy
-
-`fork()` creates an exact copy of the current process. The copy is called the **child**. The original is the **parent**.
-
-```
-Parent process
-      |
-   fork()
-     / \
-Parent  Child
-(keeps  (exact copy,
-running) runs independently)
-```
-
-After fork, both processes are running the same code. How do they know which is which?
-
-- fork() returns the **child's PID** to the parent
-- fork() returns **0** to the child
-
-```
-if (fork() == 0):
-    # I am the child
-else:
-    # I am the parent
-```
-
-### exec() — Become a Different Program
-
-`exec()` replaces the current process with a new program. It doesn't create a new process — it *transforms* the current one. The PID stays the same, but the code, data, and stack are replaced.
-
-```
-shell process (PID 1234)
-        |
-     exec("ls")
-        |
-ls process (still PID 1234, but now running ls code)
-```
-
-### wait() — Wait for a Child
-
-The parent calls `wait()` to pause until a child process finishes. This is how the shell knows when your command is done before showing the next prompt.
+All of this happens *before* any program runs. The command never sees `$HOME` — it sees the expanded value.
 
 ---
 
-## Putting It Together: Running a Command
+## Step 2: Fork
 
-When you type `ls` and press Enter, here's exactly what happens:
+The shell calls `fork()`.
+
+`fork()` is a Unix system call that **duplicates the current process**. After fork:
+- There are now two identical processes
+- The **parent** (shell) gets the child's PID
+- The **child** (new process) gets 0
 
 ```
-1. Shell reads your input: "ls"
-
-2. Shell calls fork()
-   ├── Parent (shell): stores child's PID, calls wait()
-   └── Child (new process):
-       a. Looks up "ls" in $PATH → finds /bin/ls
-       b. Calls exec("/bin/ls")
-       c. Process is now running ls
-       d. ls lists files, writes to stdout
-       e. ls finishes, exits with code 0
-
-3. Parent (shell) receives exit code from wait()
-4. Shell shows prompt again
+     Shell (PID 100)
+          |
+       fork()
+          |
+    ┌─────┴────────┐
+    │              │
+Shell (100)    Child (101)
+gets PID 101   gets 0
+waits...       executes ls
 ```
 
-That's it. Every command you run goes through this cycle.
+This is a weird but genius design. Instead of building complex machinery to create a new process from scratch, Unix just copies the existing one.
+
+---
+
+## Step 3: Exec
+
+The child process calls `exec("ls", ["-la"])`.
+
+`exec()` **replaces** the child's memory with a new program — it loads `/bin/ls` into the child's address space and starts running it from the beginning.
+
+After exec:
+- The process still has PID 101
+- But it's now running `ls`, not the shell
+- All the shell's code/data is gone
+- The file descriptors (stdin, stdout, stderr) are inherited ← this is crucial
+
+The child inherits the parent's file descriptors. This is how redirection works:
+- Before exec, the shell can replace `fd 1` (stdout) with a file
+- The child doesn't know — it just writes to fd 1 as usual
+- But that fd 1 now points to the file
+
+---
+
+## Step 4: Wait
+
+The parent shell calls `wait()`, which suspends the shell until the child finishes.
+
+When `ls` finishes, it calls `exit(code)`. The kernel:
+1. Sends SIGCHLD to the parent
+2. Records the exit code
+3. Cleans up the child process
+
+`wait()` in the parent returns with the exit code. The shell stores it in `$?`. The prompt appears.
 
 ---
 
 ## How Pipes Work Internally
 
-When you run `ls | grep .rb`, the shell does:
+When you type `ls | grep txt`, here's what really happens:
+
+1. Shell creates a **pipe** — two file descriptors: `pipe_read` and `pipe_write`
+2. Shell forks child 1 (`ls`):
+   - Replaces its stdout (fd 1) with `pipe_write`
+   - Closes `pipe_read`
+   - Execs `ls`
+3. Shell forks child 2 (`grep`):
+   - Replaces its stdin (fd 0) with `pipe_read`
+   - Closes `pipe_write`
+   - Execs `grep txt`
+4. Shell closes both ends of pipe (it doesn't need them)
+5. Shell waits for both children
 
 ```
-1. Create a pipe: two file descriptors
-   - pipe_read  (fd 3)
-   - pipe_write (fd 4)
-
-2. Fork child #1 (for ls):
-   - Close stdout (fd 1)
-   - Replace stdout with pipe_write (fd 4)
-   - exec("ls")
-   → ls writes to stdout → goes into pipe
-
-3. Fork child #2 (for grep):
-   - Close stdin (fd 0)
-   - Replace stdin with pipe_read (fd 3)
-   - exec("grep", ".rb")
-   → grep reads from stdin ← comes from pipe
-
-4. Both run concurrently
-5. When ls finishes, it closes the pipe write end
-6. grep sees EOF on stdin, finishes too
-7. Shell waits for both, shows prompt
+ls stdout → pipe_write ══════ pipe_read → grep stdin
 ```
 
-The pipe is a kernel buffer — data flows through memory, not disk. This is why pipelines are fast.
+Both processes run simultaneously. When `ls` writes data, it goes into the pipe buffer. When `grep` reads, it gets that data. When `ls` finishes and closes `pipe_write`, `grep` sees EOF and finishes too.
+
+---
+
+## System Calls — The OS Interface
+
+A **system call** is how a program asks the kernel to do something it can't do itself:
+- Read/write files
+- Create processes
+- Allocate memory
+- Send signals
+- Open network connections
+
+Key system calls you've seen indirectly:
+
+| System call | What it does |
+|-------------|-------------|
+| `fork()` | duplicate the current process |
+| `exec()` | replace process with a new program |
+| `wait()` | wait for a child to finish |
+| `open()` | open a file, get a file descriptor |
+| `read()` | read bytes from a file descriptor |
+| `write()` | write bytes to a file descriptor |
+| `pipe()` | create a pipe, get two file descriptors |
+| `dup2()` | copy a file descriptor (used for redirection) |
+| `kill()` | send a signal to a process |
+| `exit()` | terminate the current process |
+
+You can watch system calls in real time with `strace` (Linux) or `dtruss` (macOS):
+
+```bash
+# Linux:
+strace ls -la 2>&1 | head -30
+
+# macOS (needs to disable SIP, or use dtrace):
+sudo dtruss ls 2>&1 | head -30
+```
+
+You'll see every `open()`, `read()`, `write()`, `close()` call `ls` makes.
 
 ---
 
 ## File Descriptors
 
-Every process has a table of **file descriptors** — small integers that represent open files/pipes/connections.
+A **file descriptor** (fd) is just a small integer — an index into the process's table of open files.
 
 ```
-FD 0 → stdin  (keyboard)
-FD 1 → stdout (screen)
-FD 2 → stderr (screen)
-FD 3 → (next open file)
-FD 4 → (etc.)
+Process file descriptor table:
+  0 → stdin  (keyboard)
+  1 → stdout (screen)
+  2 → stderr (screen)
+  3 → (a file you opened)
+  4 → (another file)
+  ...
 ```
 
-When you open a file in a program, you get the next available number. When you close it, that number becomes available again.
+When you open a file, you get back a number (3, 4, 5...). When you read/write, you use that number. When you close it, the slot is freed.
 
-**Redirection** (`>`, `<`, `2>`) works by changing which file descriptors point to before exec:
-
+**Redirection is just dup2():**
 ```bash
-ls > output.txt
+command > file.txt
 ```
-Shell does:
-1. Open `output.txt` → gets fd 3
-2. Close fd 1 (stdout)
-3. Duplicate fd 3 as fd 1 (`dup2(3, 1)`)
-4. Fork + exec ls
-5. ls writes to fd 1 → goes to output.txt
-
-ls doesn't know or care. It just writes to "stdout". The shell arranged it.
+The shell does:
+1. Opens `file.txt`, gets fd 3
+2. `dup2(3, 1)` — makes fd 1 point to the same file as fd 3
+3. Closes fd 3
+4. Forks → execs `command`
+5. `command` writes to fd 1, which now goes to `file.txt`
 
 ---
 
-## The /proc Filesystem (Linux)
+## The Kernel — What it Does
 
-On Linux, you can inspect running processes through `/proc`:
+The **kernel** is the core of the OS. It:
+- Manages all processes (scheduling, creating, killing)
+- Manages memory (who gets what RAM)
+- Manages the filesystem (files, directories, permissions)
+- Manages devices (disks, keyboard, screen, network)
+- Handles system calls (the interface between programs and hardware)
 
-```bash
-ls /proc              # one directory per PID
-ls /proc/$$           # your current shell's info
-cat /proc/$$/status   # process info
-cat /proc/$$/maps     # memory layout
-ls /proc/$$/fd        # open file descriptors
-cat /proc/$$/cmdline  # command that was run
+User programs (including the shell) run in **user space** and can't touch hardware directly. They ask the kernel via system calls.
+
+```
+Your program (user space)
+    │
+    │  system call (open, read, write, fork...)
+    ▼
+  Kernel (kernel space)
+    │
+    ▼
+  Hardware (disk, network, CPU)
 ```
 
-On macOS, use `lsof` instead:
-```bash
-lsof -p $$            # open files for current shell
-lsof -i :8080         # what's using port 8080
-```
+This separation is why a buggy program can't crash the whole system — the kernel enforces boundaries.
 
 ---
 
-## Environment Variables
+## The Shell is Just a Program
 
-Every process inherits a copy of environment variables from its parent:
+This is worth repeating: **the shell has no special powers**.
 
-```bash
-export MY_VAR="hello"
-ruby -e 'puts ENV["MY_VAR"]'   # => hello
-```
+The shell (`/bin/zsh`, `/bin/bash`) is just a program like any other. It:
+- Reads your input
+- Parses it
+- Calls `fork()` and `exec()` like any other program could
 
-`export` marks a variable to be inherited by child processes. Without `export`, it's only visible in the current shell.
-
-```bash
-MY_VAR="hello" ruby -e 'puts ENV["MY_VAR"]'   # set just for this command
-```
-
-This is why `.env` files exist — they set environment variables that your app inherits.
-
----
-
-## The Kernel vs. User Space
-
-Unix has two modes:
-
-**User space**: where your programs run. Limited access to hardware.
-
-**Kernel space**: the OS itself. Full access to everything.
-
-When your program needs to do something real (read a file, create a process, open a network connection), it makes a **system call** — a request to the kernel.
+You could write your own shell. In fact, that's a famous programming exercise. Here's the core of a shell in pseudocode:
 
 ```
-Your program: "Please read 100 bytes from this file"
-         ↓ system call (read)
-Kernel: reads from disk, copies bytes to your process memory
-         ↓ returns
-Your program: here are your bytes
+loop:
+  print prompt
+  read line
+  parse into command + arguments
+  if command == "cd": call chdir() directly (can't fork — why?)
+  else:
+    fork()
+    if child:
+      exec(command, arguments)
+    if parent:
+      wait()
 ```
 
-System calls are the API of Unix. Everything else is built on top of them.
+Why can't `cd` be a separate program? Because `chdir()` changes the *current process*'s directory. If `cd` ran in a child process, only the child's directory would change. The parent shell would be unaffected. So `cd` must be a **builtin** — executed directly by the shell, not forked.
 
-Common system calls:
-- `open`, `read`, `write`, `close` — file I/O
-- `fork`, `exec`, `wait`, `exit` — process management
-- `pipe`, `socket` — communication
-- `stat`, `mkdir`, `unlink` — filesystem
-
----
-
-## Zombie and Orphan Processes
-
-**Zombie process**: a process that has finished but whose parent hasn't called `wait()` yet. It exists only to hold the exit code. Good parents call `wait()`.
-
-```bash
-ps aux | grep "Z"   # look for zombie processes (STAT = Z)
-```
-
-**Orphan process**: a process whose parent died before it. The kernel gives it a new parent: PID 1 (init/launchd). Orphans are adopted.
+Same for `export`, `source`, `exit`, and other builtins.
 
 ---
 
 ## Exercises
 
-1. Run `sleep 30 &` and quickly do `ls -l /proc/$!` (Linux) or `lsof -p $!` (macOS). What do you see?
-2. What is the PID of your shell? What is its parent PID? Trace the parent chain up.
-3. Run `strace ls` (Linux) or `dtruss ls` (macOS) — this shows every system call ls makes. What do you see?
-4. Create a pipe manually in bash: `exec 3<>/tmp/mypipe` — what happens?
-5. What's the difference between `MY_VAR=hello command` vs `export MY_VAR=hello`?
+1. Use `strace`/`dtruss` to watch `cat` read a file. How many system calls does it make?
+2. Why is `cd` a shell builtin and not a standalone program? (Try to explain it in your own words.)
+3. What happens to open file descriptors when you fork? Are they shared or copied?
+4. Why does `grep` in a pipe know when `ls` is done? What signals/mechanisms are involved?
+5. Write a prediction: if you do `ls 2>&1 1>/dev/null`, does stderr go to the file or the screen? Then test it. (Hint: order matters.)
 
 ---
 
@@ -235,20 +246,18 @@ ps aux | grep "Z"   # look for zombie processes (STAT = Z)
 
 | Concept | Key point |
 |---------|-----------|
-| `fork()` | copy a process |
-| `exec()` | replace process with a new program |
-| `wait()` | parent waits for child |
-| File descriptors | integers (0,1,2 = stdin/out/err) |
-| How pipes work | kernel buffer, fd duplication |
-| How redirection works | changing fd targets before exec |
-| `/proc` | live view of process internals (Linux) |
-| `lsof` | list open files (macOS) |
-| Zombie | finished process, parent hasn't waited |
-| Orphan | process whose parent died (adopted by PID 1) |
-| System call | request from user space to kernel |
+| fork() | duplicates the current process |
+| exec() | replaces current process with a new program |
+| wait() | parent waits for child to finish |
+| File descriptors | integers pointing to open files |
+| Pipes | two fds connected; both processes run simultaneously |
+| dup2() | how redirection is implemented |
+| System calls | the only way to talk to the kernel |
+| Kernel | manages everything; enforces boundaries |
+| Shell builtins | `cd`, `export` must run inside the shell |
 
 ---
 
 ## The Big Idea from This Chapter
 
-Unix's elegance comes from its simplicity. Three system calls — fork, exec, wait — are the foundation of everything. Every command you run, every pipeline, every background job, every shell script, all of it is just clever orchestration of these three primitives. Once you understand that, the whole system makes sense.
+Three system calls — `fork`, `exec`, `wait` — are the foundation of everything Unix does. Every time you run a command, every time you use a pipe, every time you redirect output — it all comes back to these three. The elegance is that these primitives are so simple and composable that you can build any program execution model on top of them.
