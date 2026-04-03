@@ -242,6 +242,134 @@ Same for `export`, `source`, `exit`, and other builtins.
 
 ---
 
+## Solutions
+
+### Exercise 1 — Watch cat read a file with strace/dtruss
+
+```bash
+# On Linux (strace):
+strace cat /etc/hosts 2>&1 | head -40
+# Look for: openat(), read(), write(), close() calls
+
+# On macOS (dtruss — needs to run as root or SIP disabled):
+sudo dtruss cat /etc/hosts 2>&1 | head -40
+
+# Alternative on macOS without disabling SIP — use dtrace probes:
+sudo dtrace -n 'syscall:::entry /execname == "cat"/ { printf("%s\n", probefunc); }' \
+  -c "cat /etc/hosts" 2>/dev/null | sort | uniq -c | sort -rn | head -20
+
+# What you'll see for 'cat file':
+# open()/openat()  — opens the file, returns fd (e.g., 3)
+# fstat()          — gets file info/size
+# read()           — reads bytes from fd 3 (usually 4096 bytes at a time)
+# write()          — writes to fd 1 (stdout)
+# read()           — reads again (returns 0 bytes = EOF)
+# close()          — closes the file descriptor
+# exit_group()     — process exits
+
+# Typical count: 10-30 system calls for a small file
+```
+
+### Exercise 2 — Why is cd a shell builtin?
+
+`cd` must be a shell builtin because `chdir()` changes the **current working directory of the calling process**.
+
+If `cd` were a separate executable:
+```
+Shell (PID 100, cwd=/home/yosia)
+  └── forks child (PID 101, cwd=/home/yosia)
+        └── exec(/bin/cd, ["cd", "Projects"])
+              └── chdir("/home/yosia/Projects")
+                    → changes PID 101's directory
+                    → exits
+Shell (PID 100) — still at cwd=/home/yosia! (unchanged)
+```
+
+The child process changes its own directory and exits. The parent shell never changes. That's why `cd` must run **inside** the shell process itself — as a builtin that calls `chdir()` directly without forking.
+
+The same logic applies to: `export` (sets shell's own environment), `source`/`.` (runs script in current shell), `exit` (exits the shell itself), and `umask`.
+
+### Exercise 3 — File descriptors after fork: shared or copied?
+
+```bash
+#!/bin/bash
+# Demonstrate fd behavior across fork (using a shell script)
+
+# Open a file and write to it from parent
+exec 3> /tmp/test_fd.txt   # open fd 3 for writing
+
+echo "parent writing line 1" >&3
+
+# When shell runs a subcommand, it forks — child inherits fd 3
+(echo "child writing line 2" >&3)
+
+echo "parent writing line 3" >&3
+
+exec 3>&-   # close fd 3
+cat /tmp/test_fd.txt
+# Shows all 3 lines — both parent and child write to the same file
+```
+
+**Answer:** File descriptors are **copied** (duplicated) on fork, not shared. Each process gets its own copy of the fd table, but both copies point to the **same underlying open file description** in the kernel (same file offset, same flags). So:
+- Both parent and child can read/write the file independently
+- Both see the same file position (they share the offset)
+- Closing an fd in the child doesn't close it in the parent
+
+### Exercise 4 — How does grep in a pipe know when ls is done?
+
+```bash
+ls | grep txt
+```
+
+The mechanism is **EOF on the pipe**:
+
+1. Shell creates a pipe: `[write_end, read_end]`
+2. `ls` gets `write_end` as its stdout; `grep` gets `read_end` as its stdin
+3. Shell closes both ends in the parent (only the children hold them)
+4. `ls` writes filenames to `write_end`
+5. `grep` reads from `read_end`, processes each line
+6. When `ls` finishes and exits, the kernel closes `write_end`
+7. `grep`'s next `read()` on `read_end` returns **0 bytes** (EOF)
+8. `grep` sees EOF, finishes, exits
+
+**No signal is sent.** EOF is the mechanism — when all write ends of a pipe are closed, readers get EOF. This is why the shell closes its copies of the pipe fds in step 3 — otherwise `grep` would never see EOF (the shell's copy of `write_end` would still be open).
+
+### Exercise 5 — Redirect ordering: ls 2>&1 1>/dev/null
+
+```bash
+# Prediction exercise:
+ls /real_dir /fake_dir 2>&1 1>/dev/null
+```
+
+**Prediction:** stderr goes to the **screen**, stdout goes to `/dev/null`.
+
+**Why:** Shell processes redirections **left to right**:
+1. `2>&1` — make stderr (fd 2) point to the same place as stdout (fd 1) → currently the screen
+2. `1>/dev/null` — make stdout (fd 1) point to `/dev/null`
+
+After step 2, stdout is now `/dev/null`, but stderr was already set to "screen" in step 1. Changing stdout afterwards doesn't affect stderr.
+
+**Test it:**
+```bash
+# Create a real directory
+mkdir /tmp/real_dir
+
+ls /tmp/real_dir /fake_dir 2>&1 1>/dev/null
+# Output: ls: /fake_dir: No such file or directory
+# (stderr shows on screen; stdout with real_dir contents is suppressed)
+
+# To send BOTH to /dev/null:
+ls /tmp/real_dir /fake_dir 1>/dev/null 2>&1   # note: reversed order!
+# Or:
+ls /tmp/real_dir /fake_dir &>/dev/null
+
+rm -r /tmp/real_dir
+```
+
+The order of redirections is critical — right-to-left thinking doesn't work here. Each redirect is evaluated at the moment it's processed.
+
+---
+
 ## What You Learned
 
 | Concept | Key point |

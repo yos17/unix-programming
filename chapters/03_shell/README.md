@@ -258,6 +258,124 @@ PS1="%n@%m %~ %% "
 
 ---
 
+## Solutions
+
+### Exercise 1 — Add ~/bin to PATH permanently
+
+```bash
+# Add this line to ~/.zshrc (or ~/.bashrc for bash)
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+
+# Create the directory if it doesn't exist
+mkdir -p ~/bin
+
+# Reload the config
+source ~/.zshrc
+
+# Verify ~/bin is now in PATH
+echo $PATH
+# Should show /Users/yosia/bin: at the beginning
+```
+
+### Exercise 2 — Redirect stderr to /dev/null
+
+```bash
+# With redirect — errors are swallowed silently
+ls /nonexistent 2>/dev/null
+# (no output, no error — the command just "fails" silently)
+echo "exit code: $?"   # => 1 (failure, but no error shown)
+
+# Without redirect — error goes to screen
+ls /nonexistent
+# ls: /nonexistent: No such file or directory
+echo "exit code: $?"   # => 1
+```
+
+`2>/dev/null` sends file descriptor 2 (stderr) to the null device — errors are discarded.
+
+### Exercise 3 — Save ls output to a file and count lines
+
+```bash
+# Save ls output to a file
+ls -la ~ > home_listing.txt
+
+# Count the lines
+wc -l home_listing.txt
+
+# Or do it in one go (count lines without saving)
+ls -la ~ | wc -l
+```
+
+### Exercise 4 — $? after success and failure
+
+```bash
+# After a successful command
+ls /usr/bin > /dev/null
+echo $?   # => 0 (zero = success in Unix)
+
+# After a failed command
+ls /this-does-not-exist 2>/dev/null
+echo $?   # => 1 (or 2 — non-zero = failure)
+
+# After grep with no match
+echo "hello" | grep "xyz" > /dev/null
+echo $?   # => 1 (grep returns 1 when no lines match)
+```
+
+`0` = success. Any non-zero value = failure. This is the universal Unix convention.
+
+### Exercise 5 — Create aliases for 3 most-used commands
+
+```bash
+# Add to ~/.zshrc:
+alias ll='ls -la'
+alias gs='git status'
+alias gp='git pull'
+
+# Or more useful ones:
+alias ..='cd ..'
+alias ...='cd ../..'
+alias cls='clear'
+alias reload='source ~/.zshrc'
+
+# After adding, reload
+source ~/.zshrc
+
+# Verify
+alias ll   # => ll='ls -la'
+```
+
+### Exercise 6 — Use Ctrl+R to search history
+
+```bash
+# In your terminal:
+# Press Ctrl+R
+# Type part of a command (e.g., "grep")
+# It shows the most recent matching command
+# Press Ctrl+R again to cycle through older matches
+# Press Enter to run, or Esc to just put it on the command line
+
+# You can also use:
+history | grep "grep"    # search history with grep
+history | tail -20       # see last 20 commands
+```
+
+### Exercise 7 — Command substitution counting files
+
+```bash
+# $ echo "Current dir has $(ls | wc -l) files"
+echo "Current dir has $(ls | wc -l) files"
+# => Current dir has 14 files   (or whatever count is in your directory)
+
+# What's happening:
+# 1. $(ls | wc -l) runs first
+# 2. ls lists files, wc -l counts lines
+# 3. The number replaces the $(...) expression
+# 4. echo prints the full string
+```
+
+---
+
 ## What You Learned
 
 | Concept | Key point |

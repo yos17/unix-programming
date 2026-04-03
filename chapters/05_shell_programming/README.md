@@ -366,6 +366,202 @@ echo $a   # 11
 
 ---
 
+## Solutions
+
+### Exercise 1 — count.sh: count lines, words, and chars in a file
+
+```bash
+#!/bin/bash
+# count.sh — summarize line/word/char counts of a file
+# Usage: ./count.sh filename
+
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <filename>" >&2
+  exit 1
+fi
+
+file="$1"
+
+if [ ! -f "$file" ]; then
+  echo "Error: '$file' is not a file or does not exist" >&2
+  exit 1
+fi
+
+lines=$(wc -l < "$file")
+words=$(wc -w < "$file")
+chars=$(wc -c < "$file")
+
+echo "File:       $file"
+echo "Lines:      $lines"
+echo "Words:      $words"
+echo "Characters: $chars"
+```
+
+```bash
+# $ chmod +x count.sh
+# $ ./count.sh README.md
+# File:       README.md
+# Lines:      142
+# Words:      1203
+# Characters: 7849
+```
+
+### Exercise 2 — rename_ext.sh: rename files from one extension to another
+
+```bash
+#!/bin/bash
+# rename_ext.sh — rename all files with one extension to another
+# Usage: ./rename_ext.sh old_ext new_ext
+# Example: ./rename_ext.sh txt md
+
+if [ $# -ne 2 ]; then
+  echo "Usage: $0 <old_extension> <new_extension>" >&2
+  exit 1
+fi
+
+old_ext="$1"
+new_ext="$2"
+count=0
+
+for file in *."$old_ext"; do
+  # Check if any files match (glob might return literal string if no match)
+  if [ ! -f "$file" ]; then
+    echo "No files with .$old_ext extension found"
+    exit 0
+  fi
+
+  # Build new filename by replacing extension
+  newfile="${file%.$old_ext}.$new_ext"
+
+  echo "Renaming: $file → $newfile"
+  mv "$file" "$newfile"
+  ((count++))
+done
+
+echo "Done. Renamed $count file(s)."
+```
+
+```bash
+# $ touch a.txt b.txt c.txt
+# $ ./rename_ext.sh txt md
+# Renaming: a.txt → a.md
+# Renaming: b.txt → b.md
+# Renaming: c.txt → c.md
+# Done. Renamed 3 file(s).
+```
+
+### Exercise 3 — monitor.sh: print time and file count every 5 seconds
+
+```bash
+#!/bin/bash
+# monitor.sh — print time and file count in current directory every 5 seconds
+# Press Ctrl+C to stop
+
+echo "Monitoring $(pwd) every 5 seconds. Press Ctrl+C to stop."
+echo ""
+
+while true; do
+  file_count=$(ls | wc -l | tr -d ' ')
+  echo "[$(date '+%H:%M:%S')] Files in current directory: $file_count"
+  sleep 5
+done
+```
+
+```bash
+# $ ./monitor.sh
+# Monitoring /Users/yosia/Projects every 5 seconds. Press Ctrl+C to stop.
+#
+# [14:32:01] Files in current directory: 12
+# [14:32:06] Files in current directory: 12
+# [14:32:11] Files in current directory: 13   ← a file was added
+```
+
+### Exercise 4 — safe_rm.sh: move files to ~/.trash/ instead of deleting
+
+```bash
+#!/bin/bash
+# safe_rm.sh — safely "delete" files by moving them to ~/.trash/
+# Usage: ./safe_rm.sh file1 [file2 ...]
+
+TRASH_DIR="$HOME/.trash"
+
+# Create trash directory if it doesn't exist
+mkdir -p "$TRASH_DIR"
+
+if [ $# -eq 0 ]; then
+  echo "Usage: $0 <file> [file2 ...]" >&2
+  exit 1
+fi
+
+moved=0
+failed=0
+
+for file in "$@"; do
+  if [ ! -e "$file" ]; then
+    echo "Warning: '$file' does not exist, skipping" >&2
+    ((failed++))
+    continue
+  fi
+
+  # Handle name conflicts: append timestamp if file already exists in trash
+  basename=$(basename "$file")
+  dest="$TRASH_DIR/$basename"
+
+  if [ -e "$dest" ]; then
+    timestamp=$(date +%Y%m%d_%H%M%S)
+    dest="$TRASH_DIR/${basename}_${timestamp}"
+  fi
+
+  mv "$file" "$dest"
+  echo "Moved '$file' to trash ($dest)"
+  ((moved++))
+done
+
+echo ""
+echo "Done. $moved moved to trash, $failed skipped."
+echo "Trash is at: $TRASH_DIR"
+echo "To restore: mv $TRASH_DIR/<file> ."
+echo "To empty:   rm -rf $TRASH_DIR/*"
+```
+
+```bash
+# $ ./safe_rm.sh old_file.txt temp.log
+# Moved 'old_file.txt' to trash (/Users/yosia/.trash/old_file.txt)
+# Moved 'temp.log' to trash (/Users/yosia/.trash/temp.log)
+#
+# Done. 2 moved to trash, 0 skipped.
+```
+
+### Exercise 5 — greet.sh: greet by name, default to $USER
+
+```bash
+#!/bin/bash
+# greet.sh — greet someone by name
+# Usage: ./greet.sh [name]
+# If no name given, uses $USER
+
+# Use $1 if provided, otherwise fall back to $USER
+name="${1:-$USER}"
+
+echo "Hello, $name!"
+echo "Today is $(date '+%A, %B %d %Y')"
+echo "The time is $(date '+%H:%M')"
+```
+
+```bash
+# $ ./greet.sh
+# Hello, yosia!
+# Today is Friday, April 03 2026
+# The time is 14:32
+
+# $ ./greet.sh Alice
+# Hello, Alice!
+# Today is Friday, April 03 2026
+# The time is 14:32
+```
+
+---
+
 ## What You Learned
 
 | Concept | Syntax |

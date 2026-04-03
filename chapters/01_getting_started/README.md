@@ -277,6 +277,90 @@ Try these yourself. Don't look at answers first.
 
 ---
 
+## Solutions
+
+### Exercise 1 — List home directory with details
+
+```bash
+# $ ls -la ~
+ls -la ~
+# Shows all files (including hidden dotfiles) with permissions, owner, size, date
+# Look for files starting with . — those are hidden config files like .zshrc, .gitconfig
+```
+
+### Exercise 2 — Count files in /usr/bin
+
+```bash
+# $ ls /usr/bin | wc -l
+ls /usr/bin | wc -l
+# ls outputs one name per line when piped; wc -l counts those lines
+# Typical result: 1000+ commands
+```
+
+### Exercise 3 — Find the biggest file in home directory
+
+```bash
+# $ ls -lS ~
+ls -lS ~
+# -S sorts by file size, largest first
+# -l shows size in bytes in the 5th column
+# The first entry after "total" is the biggest file
+```
+
+What `-S` does: sorts the listing by file size in descending order (biggest first).
+
+### Exercise 4 — Create, populate, and delete a practice directory
+
+```bash
+#!/bin/bash
+# Create directory and enter it
+mkdir unix-practice
+cd unix-practice
+
+# Create 3 files
+touch file1.txt file2.txt file3.txt
+
+# List them
+ls -l
+
+# Go back up
+cd ..
+
+# Delete the whole directory
+rm -r unix-practice
+
+# Verify it's gone
+ls -d unix-practice 2>/dev/null || echo "unix-practice is gone"
+```
+
+### Exercise 5 — Read first 5 lines of /etc/hosts
+
+```bash
+# $ head -n 5 /etc/hosts
+head -n 5 /etc/hosts
+```
+
+What's in `/etc/hosts`: A static hostname-to-IP mapping file. The OS checks here before DNS.
+Common entries:
+- `127.0.0.1 localhost` — loopback address
+- `::1 localhost` — IPv6 loopback
+- `127.0.0.1 myapp.local` — entries developers add for local development
+
+### Exercise 6 — Save date output to a file and read it back
+
+```bash
+# Save the current date/time to a file
+date > timestamp.txt
+
+# Read it back
+cat timestamp.txt
+
+# Or do both in sequence
+date > timestamp.txt && cat timestamp.txt
+```
+
+---
+
 ## The Big Idea from This Chapter
 
 Unix commands are **small, simple, and composable**.

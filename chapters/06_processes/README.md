@@ -230,6 +230,173 @@ wc -l <(find . -name "*.rb")   # count files found
 
 ---
 
+## Solutions
+
+### Exercise 1 — Start sleep 1000, find PID, kill it, verify
+
+```bash
+#!/bin/bash
+# Start sleep in background
+sleep 1000 &
+SLEEP_PID=$!
+
+echo "Started sleep with PID: $SLEEP_PID"
+
+# Verify it's running
+echo "Checking it's running:"
+ps aux | grep "sleep 1000" | grep -v grep
+
+# Kill it
+echo "Killing PID $SLEEP_PID..."
+kill $SLEEP_PID
+
+# Wait a moment and verify it's gone
+sleep 1
+echo "Verifying it's gone:"
+if ps -p $SLEEP_PID > /dev/null 2>&1; then
+  echo "Process still running!"
+else
+  echo "Process $SLEEP_PID is gone ✓"
+fi
+```
+
+```bash
+# Manual steps:
+# $ sleep 1000 &
+# [1] 45123
+# $ ps aux | grep sleep
+# yosia  45123  0.0  0.0  sleep 1000
+# $ kill 45123
+# [1]  + 45123 terminated  sleep 1000
+# $ ps aux | grep sleep | grep -v grep
+# (no output — it's gone)
+```
+
+### Exercise 2 — Run a command, pause with Ctrl+Z, check jobs, resume
+
+```bash
+# In your terminal (interactive — can't script Ctrl+Z):
+
+# 1. Start a long-running command
+sleep 60
+
+# 2. Press Ctrl+Z — you see:
+# ^Z
+# [1]  + 12345 suspended  sleep 60
+
+# 3. Check jobs
+jobs
+# [1]  + suspended  sleep 60
+
+# 4. Resume in background
+bg
+# [1]  + 12345 continued  sleep 60
+
+# 5. Or bring back to foreground
+fg
+# (now waiting for sleep 60 to finish — Ctrl+C to kill it)
+```
+
+### Exercise 3 — Difference between kill -9 and kill
+
+```bash
+# SIGTERM (default kill) — polite request to terminate
+kill 1234
+# kill -15 1234 (same thing)
+# - Process receives SIGTERM signal
+# - Process can catch the signal and do cleanup (close files, save state)
+# - Process can even ignore it
+# - Use this FIRST — let the process clean up
+
+# SIGKILL — forced, immediate termination
+kill -9 1234
+# - Kernel immediately terminates the process
+# - Process CANNOT catch, block, or ignore SIGKILL
+# - No cleanup happens — open files, temp files may be left around
+# - Use this ONLY when SIGTERM doesn't work after waiting a few seconds
+
+# Best practice:
+kill 1234
+sleep 5
+# if still running:
+kill -9 1234
+```
+
+**Rule of thumb:**
+- `kill` (SIGTERM) first: give the process a chance to clean up
+- `kill -9` (SIGKILL) only if the process doesn't respond after a few seconds
+
+### Exercise 4 — Script running 3 tasks in parallel, waiting for all
+
+```bash
+#!/bin/bash
+# parallel_tasks.sh — run multiple tasks simultaneously and wait for all
+
+echo "Starting 3 tasks in parallel at $(date '+%H:%M:%S')"
+
+# Start all tasks in background, capture their PIDs
+sleep 3 &
+pid1=$!
+echo "Task 1 started (PID $pid1, will take 3s)"
+
+sleep 2 &
+pid2=$!
+echo "Task 2 started (PID $pid2, will take 2s)"
+
+sleep 1 &
+pid3=$!
+echo "Task 3 started (PID $pid3, will take 1s)"
+
+echo "Waiting for all tasks..."
+
+# Wait for each specifically, check exit codes
+wait $pid1; echo "Task 1 done (exit: $?)"
+wait $pid2; echo "Task 2 done (exit: $?)"
+wait $pid3; echo "Task 3 done (exit: $?)"
+
+echo "All done at $(date '+%H:%M:%S') — took ~3 seconds total (not 6!)"
+```
+
+```bash
+# Shorter version from the exercise:
+sleep 3 & sleep 2 & sleep 1 & wait; echo "all done"
+# All three sleeps run simultaneously — total time is ~3 seconds
+```
+
+### Exercise 5 — Use nohup to keep a script running after terminal close
+
+```bash
+#!/bin/bash
+# date_logger.sh — append date to a file every second
+# Run with: nohup ./date_logger.sh &
+
+LOGFILE="$HOME/date_log.txt"
+
+while true; do
+  date >> "$LOGFILE"
+  sleep 1
+done
+```
+
+```bash
+# Make it executable and run with nohup
+chmod +x date_logger.sh
+nohup ./date_logger.sh &
+# Output: [1] 45678
+#         nohup: appending output to 'nohup.out'
+
+# Close your terminal. Reopen it. Check:
+ps aux | grep date_logger   # still running!
+tail -f ~/date_log.txt      # watch the dates accumulating
+
+# To stop it:
+pkill -f date_logger.sh
+```
+
+`nohup` makes the process ignore the SIGHUP signal that the terminal sends to all its child processes when it closes. Output from the script (stdout/stderr) is redirected to `nohup.out` automatically.
+
+---
+
 ## What You Learned
 
 | Concept | Key point |

@@ -251,6 +251,143 @@ Build these pipelines yourself:
 
 ---
 
+## Solutions
+
+### Exercise 1 — Count unique words in this chapter's README
+
+```bash
+# Count unique words in the README, ignoring case
+cat README.md \
+  | tr -s '[:punct:][:space:]' '\n' \
+  | tr 'A-Z' 'a-z' \
+  | grep -v '^$' \
+  | sort \
+  | uniq \
+  | wc -l
+
+# Explained version:
+cat README.md        # read the file
+| tr -s '[:punct:][:space:]' '\n'  # replace punctuation/whitespace with newlines
+| tr 'A-Z' 'a-z'    # lowercase everything
+| grep -v '^$'      # remove blank lines
+| sort              # sort alphabetically (uniq needs sorted input)
+| uniq              # keep only unique words
+| wc -l             # count them
+```
+
+### Exercise 2 — 5 most common words starting with "un" in /usr/share/dict/words
+
+```bash
+# Find words starting with "un", count them, show top 5
+grep '^un' /usr/share/dict/words | wc -l
+# Shows total count
+
+# The 5 most common "un" words (by showing alphabetically, they're all frequency=1 in a dictionary)
+# To show alphabetically first 5:
+grep '^un' /usr/share/dict/words | head -5
+
+# More interesting: find "un" words by length (longest 5)
+grep '^un' /usr/share/dict/words | awk '{ print length, $0 }' | sort -rn | head -5 | cut -d' ' -f2-
+```
+
+### Exercise 3 — List running processes sorted by memory usage
+
+```bash
+# ps aux columns: USER PID %CPU %MEM VSZ RSS TTY STAT START TIME COMMAND
+# %MEM is column 4, sort numerically in reverse
+ps aux | sort -k4 -rn | head -20
+
+# Explained:
+# ps aux     — show all processes
+# sort -k4   — sort by 4th column (%MEM)
+# -rn        — reverse order, numeric sort
+# head -20   — top 20 results
+```
+
+### Exercise 4 — Find all .rb files in ~/Projects, count total lines of code
+
+```bash
+# Find all Ruby files and count total lines
+find ~/Projects -name "*.rb" -type f | xargs wc -l 2>/dev/null | tail -1
+
+# Show per-file line counts, sorted by size
+find ~/Projects -name "*.rb" -type f | xargs wc -l 2>/dev/null | sort -rn | head -20
+
+# Explained:
+# find ~/Projects -name "*.rb" -type f  — find all .rb files
+# xargs wc -l                           — run wc -l on all found files
+# tail -1                               — wc outputs a "total" line at the end
+```
+
+### Exercise 5 — Extract unique IP addresses from a log file
+
+```bash
+# From /var/log/system.log (macOS) or any log
+# IP address pattern: one or more digits, dot, repeated 4 times
+grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' /var/log/system.log 2>/dev/null \
+  | sort -u \
+  | head -20
+
+# Explained:
+# grep -oE           — -o = only print matching part, -E = extended regex
+# \b                 — word boundary
+# ([0-9]{1,3}\.){3}  — three groups of 1-3 digits followed by dot
+# [0-9]{1,3}         — final octet (no dot)
+# sort -u            — sort and remove duplicates
+
+# If system.log is empty or inaccessible, use any log:
+grep -oE '\b([0-9]{1,3}\.){3}[0-9]{1,3}\b' /etc/hosts | sort -u
+```
+
+### Exercise 6 — Lines in /etc/hosts that aren't blank or comments
+
+```bash
+# Filter out blank lines and lines starting with #
+grep -v '^#' /etc/hosts | grep -v '^$'
+
+# Same thing with a single grep using extended regex
+grep -E '^[^#]' /etc/hosts | grep -v '^$'
+
+# Or with awk (one pass)
+awk '!/^#/ && !/^$/' /etc/hosts
+
+# Explained:
+# grep -v '^#'  — remove lines starting with #
+# grep -v '^$'  — remove empty lines
+# !/^#/         — awk: not matching lines starting with #
+# !/^$/         — awk: not matching empty lines
+```
+
+### Exercise 7 — Use awk to sum the second column
+
+```bash
+# Given data:
+# Alice 85
+# Bob 92
+# Charlie 78
+
+# One-liner:
+printf "Alice 85\nBob 92\nCharlie 78\n" | awk '{sum += $2} END {print "Total:", sum}'
+# => Total: 255
+
+# Explained version:
+awk '
+  {
+    sum += $2    # for each line, add column 2 to sum
+  }
+  END {
+    print "Total:", sum    # after all lines, print result
+  }
+' data.txt
+
+# With average:
+printf "Alice 85\nBob 92\nCharlie 78\n" | \
+  awk '{sum += $2; count++} END {printf "Total: %d, Average: %.1f\n", sum, sum/count}'
+# => Total: 255, Average: 85.0
+```
+
+---
+
 ## What You Learned
 
 | Tool | What it does |

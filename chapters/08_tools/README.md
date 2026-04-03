@@ -326,6 +326,285 @@ Suggestions:
 
 ---
 
+## Solutions
+
+### Exercise 1 — Makefile with all, test, clean targets
+
+```makefile
+# Makefile — example project build system
+
+.PHONY: all test clean
+
+all: build
+
+build:
+	@echo "Building project..."
+	@mkdir -p bin
+	@echo '#!/bin/bash' > bin/hello
+	@echo 'echo "Hello from the build!"' >> bin/hello
+	@chmod +x bin/hello
+	@echo "Build complete: bin/hello"
+
+test:
+	@echo "Running tests..."
+	@# Test that the binary exists
+	@[ -x bin/hello ] && echo "✓ bin/hello exists and is executable" || echo "✗ bin/hello missing"
+	@# Test that it outputs the expected string
+	@bin/hello | grep -q "Hello" && echo "✓ output contains 'Hello'" || echo "✗ output check failed"
+	@echo "Tests passed."
+
+clean:
+	@echo "Cleaning up..."
+	@rm -rf bin/
+	@echo "Clean complete."
+```
+
+```bash
+# $ make
+# Building project...
+# Build complete: bin/hello
+
+# $ make test
+# Running tests...
+# ✓ bin/hello exists and is executable
+# ✓ output contains 'Hello'
+# Tests passed.
+
+# $ make clean
+# Cleaning up...
+# Clean complete.
+```
+
+### Exercise 2 — Cron job that appends date every minute
+
+```bash
+# Edit your crontab
+crontab -e
+
+# Add this line (runs every minute):
+* * * * * date >> /tmp/date_log.txt
+
+# Save and exit. Verify it was added:
+crontab -l
+
+# Watch it accumulate:
+tail -f /tmp/date_log.txt
+# Fri Apr  3 14:32:00 CET 2026
+# Fri Apr  3 14:33:00 CET 2026
+# Fri Apr  3 14:34:00 CET 2026
+# ...
+
+# To remove the cron job when done:
+crontab -e   # delete the line
+# Or:
+crontab -r   # WARNING: removes ALL cron jobs
+```
+
+### Exercise 3 — Add set -euxo pipefail to a Ch5 script
+
+```bash
+#!/bin/bash
+# monitor.sh from Chapter 5 — now with strict mode
+set -euo pipefail
+
+# -e  exit immediately if any command fails
+# -u  treat unset variables as errors
+# -x  print each command before running (debug output)
+# -o pipefail  catch failures inside pipes too
+
+echo "Monitoring $(pwd) every 5 seconds. Press Ctrl+C to stop."
+echo ""
+
+while true; do
+  file_count=$(ls | wc -l | tr -d ' ')
+  echo "[$(date '+%H:%M:%S')] Files in current directory: $file_count"
+  sleep 5
+done
+
+# With -x, you'll see output like:
+# + pwd
+# + echo 'Monitoring /Users/yosia/Projects...'
+# + ls
+# + wc -l
+# + tr -d ' '
+# + file_count=12
+# ...
+
+# Bugs -euxo pipefail catches:
+# - Without -u: $typo_var would silently be empty; now it's an error
+# - Without -e: failing commands are ignored; now the script stops
+# - Without pipefail: grep -q "x" file | wc -l — if grep fails (no match),
+#   the pipeline still "succeeds" without pipefail
+```
+
+### Exercise 4 — log-watch.sh: monitor a log file and alert on ERROR
+
+```bash
+#!/bin/bash
+# log-watch.sh — monitor a log file and alert when ERROR appears
+# Usage: ./log-watch.sh [logfile]
+
+set -euo pipefail
+
+LOGFILE="${1:-/tmp/test.log}"
+
+if [ ! -f "$LOGFILE" ]; then
+  echo "Log file not found: $LOGFILE" >&2
+  echo "Creating it for demo purposes..."
+  touch "$LOGFILE"
+fi
+
+echo "Watching $LOGFILE for ERROR messages... (Ctrl+C to stop)"
+echo ""
+
+# tail -F follows file even if it's rotated (re-created)
+tail -F "$LOGFILE" | while IFS= read -r line; do
+  timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
+
+  # Check if the line contains ERROR (case-insensitive)
+  if echo "$line" | grep -qi "error"; then
+    echo "🚨 ALERT [$timestamp]: $line"
+  else
+    echo "   INFO  [$timestamp]: $line"
+  fi
+done
+```
+
+```bash
+# Test it:
+# Terminal 1:
+# $ ./log-watch.sh /tmp/test.log
+
+# Terminal 2 (generate test log entries):
+# $ echo "INFO: server started" >> /tmp/test.log
+# $ echo "INFO: request received" >> /tmp/test.log
+# $ echo "ERROR: database connection failed" >> /tmp/test.log
+# $ echo "INFO: retrying..." >> /tmp/test.log
+
+# Terminal 1 will show:
+#    INFO  [2026-04-03 14:32:01]: INFO: server started
+#    INFO  [2026-04-03 14:32:03]: INFO: request received
+# 🚨 ALERT [2026-04-03 14:32:05]: ERROR: database connection failed
+#    INFO  [2026-04-03 14:32:07]: INFO: retrying...
+```
+
+### Exercise 5 — Build ~/bin with 3 useful personal scripts
+
+```bash
+# Set up ~/bin
+mkdir -p ~/bin
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+**Script 1: `~/bin/today` — show date, day, and simple reminder**
+
+```bash
+#!/bin/bash
+# today — quick daily summary
+
+echo "📅 $(date '+%A, %B %d %Y')"
+echo "⏰ $(date '+%H:%M %Z')"
+echo ""
+echo "📂 Current directory: $(pwd)"
+echo "💻 Disk usage home:   $(du -sh ~ 2>/dev/null | cut -f1)"
+echo ""
+if [ -f ~/todo.txt ]; then
+  echo "📋 Todo:"
+  cat ~/todo.txt
+fi
+```
+
+**Script 2: `~/bin/mkproject` — create a new project with standard structure**
+
+```bash
+#!/bin/bash
+# mkproject — create a new project directory with standard structure
+# Usage: mkproject <project-name>
+
+set -euo pipefail
+
+if [ $# -ne 1 ]; then
+  echo "Usage: $0 <project-name>" >&2
+  exit 1
+fi
+
+name="$1"
+dir="$HOME/Projects/$name"
+
+if [ -d "$dir" ]; then
+  echo "Error: $dir already exists" >&2
+  exit 1
+fi
+
+mkdir -p "$dir"/{src,test,docs}
+cat > "$dir/README.md" << EOF
+# $name
+
+## Description
+
+TODO: describe this project
+
+## Usage
+
+\`\`\`bash
+# how to run it
+\`\`\`
+EOF
+
+cat > "$dir/.gitignore" << 'EOF'
+*.log
+*.tmp
+.DS_Store
+EOF
+
+cd "$dir"
+git init -q
+git add .
+git commit -q -m "Initial project structure"
+
+echo "✅ Created project: $dir"
+echo "   cd $dir"
+```
+
+**Script 3: `~/bin/serve` — start a local HTTP server in current directory**
+
+```bash
+#!/bin/bash
+# serve — start a local HTTP server in the current directory
+# Usage: serve [port]
+
+PORT="${1:-8000}"
+
+echo "🌐 Serving $(pwd) at http://localhost:$PORT"
+echo "   Press Ctrl+C to stop"
+echo ""
+
+# Try different available web servers
+if command -v python3 &>/dev/null; then
+  python3 -m http.server "$PORT"
+elif command -v ruby &>/dev/null; then
+  ruby -run -e httpd . -p "$PORT"
+elif command -v npx &>/dev/null; then
+  npx serve -l "$PORT" .
+else
+  echo "Error: No web server found (need python3, ruby, or node)" >&2
+  exit 1
+fi
+```
+
+```bash
+# Make all scripts executable
+chmod +x ~/bin/today ~/bin/mkproject ~/bin/serve
+
+# Use them:
+# $ today
+# $ mkproject my-new-app
+# $ serve 3000
+```
+
+---
+
 ## What You Learned
 
 | Concept | Key point |

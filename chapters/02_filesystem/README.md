@@ -242,6 +242,101 @@ du -sh ~       # total size of your home directory
 
 ---
 
+## Solutions
+
+### Exercise 1 — Inode number of /etc/hosts
+
+```bash
+# $ ls -i /etc/hosts
+ls -i /etc/hosts
+# Output: 8646911828 /etc/hosts
+# The number before the filename is the inode number
+```
+
+### Exercise 2 — Hard link test: do edits show through?
+
+```bash
+#!/bin/bash
+# Create a file and a hard link to it
+echo "original content" > original.txt
+ln original.txt hardlink.txt
+
+echo "--- Before edit ---"
+echo "original.txt:"; cat original.txt
+echo "hardlink.txt:"; cat hardlink.txt
+
+# Edit the original
+echo "edited content" >> original.txt
+
+echo "--- After edit ---"
+echo "original.txt:"; cat original.txt
+echo "hardlink.txt:"; cat hardlink.txt
+
+# Check inodes — they should be the same number
+ls -i original.txt hardlink.txt
+```
+
+**Yes** — editing the original shows the change in the hard link. They are the same file (same inode). Both names point to the same data on disk.
+
+### Exercise 3 — Symlink to Desktop, navigate via it, observe pwd
+
+```bash
+# Create a symlink to Desktop
+ln -s ~/Desktop ~/desktop-link
+
+# Navigate via the symlink
+cd ~/desktop-link
+
+# What does pwd show?
+pwd
+# On macOS it typically shows: /Users/yosia/desktop-link (the symlink path)
+# You can get the real path with:
+pwd -P   # physical path: /Users/yosia/Desktop
+```
+
+`pwd` shows the symlink path by default. `pwd -P` resolves all symlinks and shows the real path.
+
+### Exercise 4 — Find .log files under /var/log
+
+```bash
+# Find all .log files and count them
+find /var/log -name "*.log" -type f 2>/dev/null | wc -l
+
+# Show them with sizes
+find /var/log -name "*.log" -type f 2>/dev/null | head -20
+
+# Count with permissions errors suppressed
+find /var/log -name "*.log" 2>/dev/null | wc -l
+```
+
+### Exercise 5 — Permissions of /etc/hosts
+
+```bash
+# $ ls -l /etc/hosts
+ls -l /etc/hosts
+# -rw-r--r--  1 root  wheel  213 Jan  1 00:00 /etc/hosts
+
+# Who can write to it?
+# owner (root) has rw- → root can read and write
+# group (wheel) has r-- → wheel members can only read
+# others have r-- → everyone else can only read
+# Conclusion: only root can write to /etc/hosts
+# To edit it you need: sudo nano /etc/hosts
+```
+
+### Exercise 6 — What's taking the most space in home directory
+
+```bash
+# $ du -sh * ~
+du -sh ~/* | sort -rh | head -10
+# -s = summary (one entry per item, not recursive detail)
+# -h = human-readable (KB, MB, GB)
+# sort -rh = reverse sort by human-readable size (biggest first)
+# head -10 = show top 10
+```
+
+---
+
 ## What You Learned
 
 | Concept | Key point |
